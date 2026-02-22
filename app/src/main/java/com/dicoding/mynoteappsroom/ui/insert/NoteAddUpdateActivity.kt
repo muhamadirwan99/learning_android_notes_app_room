@@ -18,15 +18,19 @@ import com.dicoding.mynoteappsroom.databinding.ActivityNoteAddUpdateBinding
 import com.dicoding.mynoteappsroom.helper.DateHelper
 import com.dicoding.mynoteappsroom.helper.ViewModelFactory
 
+// Activity ini digunakan untuk dua mode: TAMBAH catatan baru & EDIT catatan yang sudah ada.
+// Mode ditentukan dari ada tidaknya data Note yang dikirim lewat Intent.
 class NoteAddUpdateActivity : AppCompatActivity() {
     companion object {
-        const val EXTRA_NOTE = "extra_note"
-        const val ALERT_DIALOG_CLOSE = 10
-        const val ALERT_DIALOG_DELETE = 20
+        const val EXTRA_NOTE = "extra_note" // Key Intent untuk mengirim/menerima objek Note antar Activity.
+        const val ALERT_DIALOG_CLOSE = 10   // Kode penanda untuk dialog konfirmasi batalkan perubahan.
+        const val ALERT_DIALOG_DELETE = 20  // Kode penanda untuk dialog konfirmasi hapus catatan.
     }
 
+    // isEdit sebagai flag mode: false = mode tambah, true = mode edit.
+    // Digunakan untuk menentukan label, tombol, dan aksi yang ditampilkan.
     private var isEdit = false
-    private var note: Note? = null
+    private var note: Note? = null // null jika mode tambah, berisi data jika mode edit.
 
     private lateinit var noteAddUpdateViewModel: NoteAddUpdateViewModel
     private lateinit var binding: ActivityNoteAddUpdateBinding
@@ -44,6 +48,9 @@ class NoteAddUpdateActivity : AppCompatActivity() {
 
         noteAddUpdateViewModel = obtainViewModel(this@NoteAddUpdateActivity)
 
+        // Cara mengambil Parcelable berbeda antara Android 13+ dan di bawahnya.
+        // Build.VERSION_CODES.TIRAMISU = API 33. Pengecekan ini menghindari deprecation warning
+        // sambil tetap mendukung perangkat lama.
         note = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent.getParcelableExtra<Note>(EXTRA_NOTE, Note::class.java)
         } else {
@@ -51,6 +58,8 @@ class NoteAddUpdateActivity : AppCompatActivity() {
             intent.getParcelableExtra<Note>(EXTRA_NOTE)
         }
 
+        // Jika note tidak null berarti Activity dibuka dari klik item (mode Edit).
+        // Jika null, buat objek Note kosong sebagai wadah data yang akan diisi user.
         if (note != null) {
             isEdit = true
         } else {
@@ -63,6 +72,7 @@ class NoteAddUpdateActivity : AppCompatActivity() {
         if (isEdit) {
             actionBarTitle = getString(R.string.change)
             btnTitle = getString(R.string.update)
+            // Pre-fill form dengan data note yang sudah ada agar user bisa langsung mengedit.
             if (note != null) {
                 note?.let { note ->
                     binding.edtTitle.setText(note.title)
@@ -75,14 +85,16 @@ class NoteAddUpdateActivity : AppCompatActivity() {
         }
 
         supportActionBar?.title = actionBarTitle
+        // Menampilkan tombol panah kembali di ActionBar agar user bisa navigasi ke belakang.
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         binding.btnSubmit.text = btnTitle
 
         binding.btnSubmit.setOnClickListener {
-            val title = binding.edtTitle.text.toString().trim()
+            val title = binding.edtTitle.text.toString().trim()       // trim() menghapus spasi di awal/akhir.
             val description = binding.edtDescription.text.toString().trim()
             when {
+                // Validasi dilakukan sebelum menyimpan agar tidak ada catatan tanpa judul/deskripsi.
                 title.isEmpty() -> {
                     binding.edtTitle.error = getString(R.string.empty)
                 }
@@ -92,25 +104,32 @@ class NoteAddUpdateActivity : AppCompatActivity() {
                 }
 
                 else -> {
+                    // Update data note dengan input terbaru dari user sebelum disimpan.
                     note.let { note ->
                         note?.title = title
                         note?.description = description
                     }
                     if (isEdit) {
+                        // Mode edit: update baris yang sudah ada di database berdasarkan id-nya.
                         noteAddUpdateViewModel.update(note as Note)
                         showToast(getString(R.string.changed))
                     } else {
+                        // Mode tambah: set tanggal hanya saat pertama kali dibuat,
+                        // bukan saat diedit — agar tanggal mencerminkan waktu pembuatan asli.
                         note.let { note ->
                             note?.date = DateHelper.getCurrentDate()
                         }
                         noteAddUpdateViewModel.insert(note as Note)
                         showToast(getString(R.string.added))
                     }
-                    finish()
+                    finish() // Tutup Activity dan kembali ke MainActivity setelah operasi berhasil.
                 }
             }
         }
 
+        // Menggunakan OnBackPressedCallback (API modern) sebagai pengganti onBackPressed() yang deprecated.
+        // Tujuannya: mencegat tombol Back dan menampilkan konfirmasi sebelum keluar,
+        // agar user tidak kehilangan perubahan secara tidak sengaja.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 showAlertDialog(ALERT_DIALOG_CLOSE)
@@ -119,6 +138,8 @@ class NoteAddUpdateActivity : AppCompatActivity() {
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        // Menu hapus hanya dimunculkan saat mode Edit — tidak masuk akal menghapus catatan
+        // yang belum tersimpan (mode tambah).
         if (isEdit) {
             menuInflater.inflate(R.menu.menu_form, menu)
         }
@@ -127,13 +148,15 @@ class NoteAddUpdateActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
-            R.id.action_delete -> showAlertDialog(ALERT_DIALOG_DELETE)
-            android.R.id.home -> showAlertDialog(ALERT_DIALOG_CLOSE)
+            R.id.action_delete -> showAlertDialog(ALERT_DIALOG_DELETE) // Tombol hapus di menu.
+            android.R.id.home -> showAlertDialog(ALERT_DIALOG_CLOSE)   // Tombol panah kembali di ActionBar.
         }
         return super.onOptionsItemSelected(item)
     }
 
     private fun showAlertDialog(type: Int) {
+        // Satu fungsi untuk dua jenis dialog, dibedakan lewat parameter 'type'
+        // agar tidak ada duplikasi kode pembuatan AlertDialog.
         val isDialogClose = type == ALERT_DIALOG_CLOSE
         val dialogTitle: String
         val dialogMessage: String
@@ -148,21 +171,24 @@ class NoteAddUpdateActivity : AppCompatActivity() {
         with(alertDialogBuilder) {
             setTitle(dialogTitle)
             setMessage(dialogMessage)
-            setCancelable(false)
+            setCancelable(false) // Mencegah dialog tertutup saat user tap di luar dialog — memaksa pilihan eksplisit.
             setPositiveButton(getString(R.string.yes)) { _, _ ->
                 if (!isDialogClose) {
+                    // Hapus data dari database hanya jika user mengkonfirmasi dialog hapus.
                     noteAddUpdateViewModel.delete(note as Note)
                     showToast(getString(R.string.deleted))
                 }
-                finish()
+                finish() // Baik untuk dialog tutup maupun hapus, keluar dari Activity setelahnya.
             }
-            setNegativeButton(getString(R.string.no)) { dialog, _ -> dialog.cancel() }
+            setNegativeButton(getString(R.string.no)) { dialog, _ -> dialog.cancel() } // Batal: tutup dialog, tetap di layar.
         }
         val alertDialog = alertDialogBuilder.create()
         alertDialog.show()
     }
 
     private fun showToast(message: String) {
+        // Fungsi helper kecil ini menghindari pengulangan boilerplate Toast.makeText setiap kali
+        // ingin menampilkan pesan singkat.
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
